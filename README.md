@@ -1,6 +1,6 @@
 <div align="center">
 <h2>Effective Diffusion Transformer Architecture for Image Super-Resolution</h2>
-
+<a href='ttps://arxiv.org/abs/2409.19589'><img src='https://img.shields.io/badge/arXiv-2409.19589-b31b1b.svg'></a>
 <div>
     <a href='https://github.com/kunncheng'>Kun Cheng* <sup>1</sup></a>&emsp;
     <a href='https://github.com/kunncheng/DiT-SR'>Lei Yu* <sup>2</a>&emsp;
@@ -20,10 +20,76 @@ Telecommunications
 </div>
 <div align="justify">
 
-## Introduction
+## 🔎 Introduction 
 
-We propose DiT-SR, an effective diffusion transformer architecture for real-world image super resolution: 
+We propose DiT-SR, an effective diffusion transformer for real-world image super resolution:
+ - Effective yet efficient architecture design;
+ - Adaptive Frequence Modulation (AdaFM) for time step.
 
- - Effective yet efficient DiT architecture design;
- - Adaptive Frequence Modulation (AdaFM) for diffusion time step.
+<p align="center">
+  <img src="assets/framework.jpg">
+</p>
 
+
+## ⚙️ Dependencies and Installation
+
+```
+git clone https://github.com/kunncheng/DiT-SR.git
+cd DiT-SR
+
+conda create -n DiT_SR python=3.10 -y
+conda activate DiT_SR
+pip install -r requirements.txt
+```
+
+## 🌈 Training
+### Datasets
+The training data comprises [LSDIR](https://data.vision.ee.ethz.ch/yawli/index.html), [DIV2K](https://data.vision.ee.ethz.ch/cvl/DIV2K/), [DIV8K](https://ieeexplore.ieee.org/document/9021973), [OutdoorSceneTraining](https://mmlab.ie.cuhk.edu.hk/projects/SFTGAN/), [Flicker2K](https://www.kaggle.com/datasets/hliang001/flickr2k) and the first 10K face images from [FFHQ](https://github.com/NVlabs/ffhq-dataset). We saved all the image paths to ```txt``` files. For simplicity, you can also just use the LSDIR dataset.
+
+### Pre-trained Models
+Several [checkpoints](https://drive.google.com/drive/folders/15EQYY3aKUKB9N3ec-AsXAZlhdCFzhT4R?usp=sharing) should be downloaded to ```weights``` folder, including autoencoder and other pre-trained models for loss calculation.
+
+### Training Scripts
+**Real-world Image Super-resolution**
+```
+torchrun --standalone --nproc_per_node=8 --nnodes=1 main.py --cfg_path configs/realsr_DiT.yaml --save_dir ${save_dir}
+```
+
+**Blind Face Restoration**
+```
+torchrun --standalone --nproc_per_node=8 --nnodes=1 main.py --cfg_path configs/faceir_DiT.yaml --save_dir ${save_dir}
+```
+
+
+## 🚀 Inference and Evaluation
+**Real-world Image Super-resolution**
+
+Real-world datasets: [RealSR](https://github.com/wyf0912/SinSR/tree/main/testdata), [RealSet65](https://github.com/wyf0912/SinSR/tree/main/testdata); Synthetic datasets: LSDIR-Test; Pretrained [checkpoints](https://drive.google.com/drive/folders/15EQYY3aKUKB9N3ec-AsXAZlhdCFzhT4R?usp=sharing).
+```
+bash test_realsr.sh
+```
+
+**Blind Face Restoration**
+
+Real-world datasets: [LFW](https://xinntao.github.io/projects/gfpgan), [WebPhoto](https://xinntao.github.io/projects/gfpgan), [Wider](https://shangchenzhou.com/projects/CodeFormer/); Synthetic datasets: CelebA-HQ; Pretrained [checkpoints](https://drive.google.com/drive/folders/15EQYY3aKUKB9N3ec-AsXAZlhdCFzhT4R?usp=sharing).
+```
+bash test_faceir.sh
+```
+For the synthetic datasets (LSDIR-Test and CelebA-HQ), we are unable to release them due to corporate review restrictions. However, you can generate them yourself using these [scripts](https://github.com/zsyOAOA/ResShift/tree/journal/scripts).
+
+## 🎓 Citiation
+If you find our work useful in your research, please consider citing:
+```
+@misc{cheng2024ditsr,
+      title={Effective Diffusion Transformer Architecture for Image Super-Resolution},
+      author={Kun Cheng and Lei Yu and Zhijun Tu and Xiao He and Liyu Chen and Yong Guo and Mingrui Zhu and Nannan Wang and Xinbo Gao and Jie Hu},
+      year={2024},
+      eprint={2409.19589},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2409.19589}, 
+}
+```
+
+## ❤️ Acknowledgement
+We sincerely appreciate the code release of the following projects: [ResShift](https://github.com/zsyOAOA/ResShift), [DiT](https://github.com/facebookresearch/DiT), [FFTFormer](https://github.com/kkkls/FFTformer), [SwinIR](https://github.com/JingyunLiang/SwinIR), [SinSR](https://github.com/wyf0912/SinSR), and [BasicSR](https://github.com/XPixelGroup/BasicSR).
