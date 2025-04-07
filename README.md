@@ -1,6 +1,6 @@
 <div align="center">
 <h2>Effective Diffusion Transformer Architecture for Image Super-Resolution</h2>
-<a href='ttps://arxiv.org/abs/2409.19589'><img src='https://img.shields.io/badge/arXiv-2409.19589-b31b1b.svg'></a>
+<a href='https://arxiv.org/abs/2409.19589'><img src='https://img.shields.io/badge/arXiv-2409.19589-b31b1b.svg'></a>
 <div>
     <a href='https://github.com/kunncheng'>Kun Cheng* <sup>1</sup></a>&emsp;
     <a href='https://github.com/kunncheng/DiT-SR'>Lei Yu* <sup>2</a>&emsp;
