@@ -9,6 +9,12 @@ from copy import deepcopy
 from collections import OrderedDict
 import torch.nn.functional as F
 
+def load_model(model, ckpt_path=None, rank=0):
+    state = torch.load(ckpt_path, map_location=f"cuda:{rank}")
+    if 'state_dict' in state:
+        state = state['state_dict']
+    reload_model(model, state)
+
 def calculate_parameters(net):
     out = 0
     for param in net.parameters():
