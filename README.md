@@ -80,14 +80,14 @@ For the synthetic datasets (LSDIR-Test and CelebA-HQ), we are unable to release 
 ## 🎓 Citiation
 If you find our work useful in your research, please consider citing:
 ```
-@misc{cheng2024ditsr,
-      title={Effective Diffusion Transformer Architecture for Image Super-Resolution},
-      author={Kun Cheng and Lei Yu and Zhijun Tu and Xiao He and Liyu Chen and Yong Guo and Mingrui Zhu and Nannan Wang and Xinbo Gao and Jie Hu},
-      year={2024},
-      eprint={2409.19589},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2409.19589}, 
+@inproceedings{cheng2025effective,
+  title={Effective diffusion transformer architecture for image super-resolution},
+  author={Cheng, Kun and Yu, Lei and Tu, Zhijun and He, Xiao and Chen, Liyu and Guo, Yong and Zhu, Mingrui and Wang, Nannan and Gao, Xinbo and Hu, Jie},
+  booktitle={Proceedings of the AAAI Conference on Artificial Intelligence},
+  volume={39},
+  number={3},
+  pages={2455--2463},
+  year={2025}
 }
 ```
 
