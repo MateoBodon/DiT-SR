@@ -1,6 +1,8 @@
+from four_channel_vae.autoencoder import AutoencoderKL
+
 import os, sys, math, time, random, datetime, functools
 import lpips
-import numpy as np
+import numpy as np 
 from pathlib import Path
 from loguru import logger
 from copy import deepcopy
@@ -433,37 +435,106 @@ class TrainerDifIR(TrainerBase):
                     )
 
     def build_model(self):
+        # super().build_model()
+        # if self.rank == 0 and hasattr(self.configs.train, 'ema_rate'):
+        #     self.ema_ignore_keys.extend([x for x in self.ema_state.keys() if 'relative_position_index' in x])
+
+        # # autoencoder
+        # if self.configs.autoencoder is not None:
+        #     if self.rank == 0:
+        #         self.logger.info(f"Restoring autoencoder from {self.configs.autoencoder.ckpt_path}")
+        #     params = self.configs.autoencoder.get('params', dict)
+        #     autoencoder = util_common.get_obj_from_str(self.configs.autoencoder.target)(**params)
+        #     autoencoder.cuda()
+        #     util_net.load_model(autoencoder, self.configs.autoencoder.ckpt_path, self.rank)
+            
+
+        #     for params in autoencoder.parameters():
+        #         params.requires_grad_(False)
+        #     autoencoder.eval()
+        #     if self.configs.train.compile.flag:
+        #         if self.rank == 0:
+        #             self.logger.info("Begin compiling autoencoder model...")
+        #         autoencoder = torch.compile(autoencoder, mode=self.configs.train.compile.mode)
+        #         if self.rank == 0:
+        #             self.logger.info("Compiling Done")
+        #     self.autoencoder = autoencoder
+        # else:
+        #     self.autoencoder = None
+
+        # # LPIPS metric
+        # lpips_loss = lpips.LPIPS(net='vgg').to(f"cuda:{self.rank}")
+        # for params in lpips_loss.parameters():
+        #     params.requires_grad_(False)
+        # lpips_loss.eval()
+        # if self.configs.train.compile.flag:
+        #     if self.rank == 0:
+        #         self.logger.info("Begin compiling LPIPS Metric...")
+        #     lpips_loss = torch.compile(lpips_loss, mode=self.configs.train.compile.mode)
+        #     if self.rank == 0:
+        #         self.logger.info("Compiling Done")
+        # self.lpips_loss = lpips_loss
+
+        # params = self.configs.diffusion.get('params', dict)
+        # self.base_diffusion = util_common.get_obj_from_str(self.configs.diffusion.target)(**params)
+
         super().build_model()
         if self.rank == 0 and hasattr(self.configs.train, 'ema_rate'):
             self.ema_ignore_keys.extend([x for x in self.ema_state.keys() if 'relative_position_index' in x])
 
-        # autoencoder
-        if self.configs.autoencoder is not None:
+        # AutoencoderKL for 4-channel images
+        if self.configs.get('four_channel_autoencoder') is not None:
             if self.rank == 0:
-                self.logger.info(f"Restoring autoencoder from {self.configs.autoencoder.ckpt_path}")
-            params = self.configs.autoencoder.get('params', dict)
-            autoencoder = util_common.get_obj_from_str(self.configs.autoencoder.target)(**params)
-            autoencoder.cuda()
-            util_net.load_model(autoencoder, self.configs.autoencoder.ckpt_path, self.rank)
-            
+                self.logger.info("Initializing 4-Channel AutoencoderKL...")
 
-            for params in autoencoder.parameters():
-                params.requires_grad_(False)
-            autoencoder.eval()
-            if self.configs.train.compile.flag:
+            ae_config_params = self.configs.four_channel_autoencoder.get('params', {})
+            ae_ckpt_path = self.configs.four_channel_autoencoder.get('ckpt_path')
+            ae_trainable = self.configs.four_channel_autoencoder.get('trainable', False)
+            ae_compile = self.configs.four_channel_autoencoder.get('compile', False)
+
+            autoencoder = AutoencoderKL(
+                ddconfig=ae_config_params.get('ddconfig'),
+                embed_dim=ae_config_params.get('embed_dim')
+            )
+            autoencoder.cuda()
+
+            if ae_ckpt_path:
                 if self.rank == 0:
-                    self.logger.info("Begin compiling autoencoder model...")
+                    self.logger.info(f"Restoring 4-Channel AutoencoderKL from {ae_ckpt_path}")
+                ckpt = torch.load(ae_ckpt_path, map_location=f"cuda:{self.rank}")
+
+                if 'state_dict' in ckpt:
+                    ckpt = ckpt['state_dict']
+
+                # Optionally strip prefix if coming from full model
+                ae_weights = ckpt  # assume direct AE weights for now
+                missing_keys, unexpected_keys = autoencoder.load_state_dict(ae_weights, strict=False)
+
+                if self.rank == 0:
+                    self.logger.info(f"AE Missing keys: {missing_keys}")
+                    self.logger.info(f"AE Unexpected keys: {unexpected_keys}")
+
+            for p in autoencoder.parameters():
+                p.requires_grad_(ae_trainable)
+
+            autoencoder.eval() if not ae_trainable else autoencoder.train()
+
+            if self.configs.train.compile.flag and ae_compile:
+                if self.rank == 0:
+                    self.logger.info("Begin compiling 4-Channel Autoencoder model...")
                 autoencoder = torch.compile(autoencoder, mode=self.configs.train.compile.mode)
                 if self.rank == 0:
-                    self.logger.info("Compiling Done")
+                    self.logger.info("Compiling Autoencoder Done")
+
             self.autoencoder = autoencoder
         else:
+            self.logger.error("Four channel autoencoder configuration ('four_channel_autoencoder') not found in configs!")
             self.autoencoder = None
 
         # LPIPS metric
         lpips_loss = lpips.LPIPS(net='vgg').to(f"cuda:{self.rank}")
-        for params in lpips_loss.parameters():
-            params.requires_grad_(False)
+        for p in lpips_loss.parameters():
+            p.requires_grad_(False)
         lpips_loss.eval()
         if self.configs.train.compile.flag:
             if self.rank == 0:
@@ -473,6 +544,7 @@ class TrainerDifIR(TrainerBase):
                 self.logger.info("Compiling Done")
         self.lpips_loss = lpips_loss
 
+        # Base diffusion model
         params = self.configs.diffusion.get('params', dict)
         self.base_diffusion = util_common.get_obj_from_str(self.configs.diffusion.target)(**params)
 
