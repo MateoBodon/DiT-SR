@@ -103,53 +103,37 @@ degradation:
 
 data:
   train:
-    type: realesrgan
-    params:
-      txt_file_path:
-        - data_list/LSDIR_train.txt
-        - data_list/ffhq1024_roma_10k.txt
-        - data_list/Flickr2K.txt
-        - data_list/DIV2K.txt
-        - data_list/DIV8K.txt
-        - data_list/OST300.txt
-      im_exts: ['JPEG']
-      io_backend:
-        type: disk
-      blur_kernel_size: 21
-      kernel_list: ['iso', 'aniso', 'generalized_iso', 'generalized_aniso', 'plateau_iso', 'plateau_aniso']
-      kernel_prob: [0.45, 0.25, 0.12, 0.03, 0.12, 0.03]
-      sinc_prob: 0.1
-      blur_sigma: [0.2, 3.0]
-      betag_range: [0.5, 4.0]
-      betap_range: [1, 2.0]
-      blur_kernel_size2: 15
-      kernel_list2: ['iso', 'aniso', 'generalized_iso', 'generalized_aniso', 'plateau_iso', 'plateau_aniso']
-      kernel_prob2: [0.45, 0.25, 0.12, 0.03, 0.12, 0.03]
-      sinc_prob2: 0.1
-      blur_sigma2: [0.2, 1.5]
-      betag_range2: [0.5, 4.0]
-      betap_range2: [1, 2.0]
-      final_sinc_prob: 0.8
-      gt_size: 256
-      crop_pad_size: 300
-      use_hflip: True
-      use_rot: False
-      rescale_gt: True
+    name: SEN2NAIP_Train
+    type: SEN2NAIPDataset # Name of your new class
+    dataroot_gt: /path/to/your/sen2naip_dataset/train/HR_NAIP_patches_256x256/
+    dataroot_lq: /path/to/your/sen2naip_dataset/train/LR_S2like_patches_64x64/
+    # Or if using a meta file:
+    # meta_info_file: /path/to/your/sen2naip_train_meta.txt 
+    # dataroot_gt: /path_prefix_for_gt_in_meta_file/ (can be empty if paths in meta are absolute)
+    # dataroot_lq: /path_prefix_for_lq_in_meta_file/
+    filename_tmpl: '{}' # If scanning folders and files are directly named, e.g. 0001.tif
+    io_backend: {type: disk} # For local file system
+
+    gt_size: 256      # HR patch size for training
+    scale: 4          # Upscaling factor
+    use_hflip: true
+    use_rot: true
+
+    num_worker_per_gpu: 4 
+    batch_size_per_gpu: 2 # Start small with 4-channel data
+    dataset_enlarge_ratio: 1
+    phase: train
+
   val:
-    type: base
-    params:
-      dir_path: testdata/Val_SR/lq
-      im_exts: png
-      transform_type: default
-      transform_kwargs:
-        mean: 0.5
-        std: 0.5
-      extra_dir_path: testdata/Val_SR/gt
-      extra_transform_type: default
-      extra_transform_kwargs:
-        mean: 0.5
-        std: 0.5
-      recursive: False
+    name: SEN2NAIP_Val
+    type: SEN2NAIPDataset
+    dataroot_gt: /path/to/your/sen2naip_dataset/val/HR_NAIP_patches/
+    dataroot_lq: /path/to/your/sen2naip_dataset/val/LR_S2like_patches/
+    # meta_info_file: /path/to/your/sen2naip_val_meta.txt
+    io_backend: {type: disk}
+    scale: 4
+    phase: val # No random crop/augmentation usually for validation
+    gt_size: 256 # Validation patches might be loaded as is or center-cropped
 
 train:
   lr: 5e-5
