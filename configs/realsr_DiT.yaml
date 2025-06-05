@@ -24,9 +24,9 @@ model:
   ckpt_path: ~
   params:
     image_size: 64
-    in_channels: 3
+    in_channels: 4
     model_channels: 160
-    out_channels: 3
+    out_channels: 4
     attention_resolutions: [64, 32, 16, 8]
     dropout: 0.1
     channel_mult: [1, 2, 2, 4]
@@ -52,32 +52,33 @@ diffusion:
     steps: 15
     min_noise_level: 0.04
     kappa: 2.0
-    weighted_mse: False
+    # weighted_mse: False
+    loss_type: L1 # set the loss type to L1
     predict_type: xstart
     timestep_respacing: ~
     scale_factor: 1.0
     normalize_input: True
     latent_flag: True
 
-autoencoder:
-  target: ldm.models.autoencoder.VQModelTorch
-  ckpt_path: weights/autoencoder_vq_f4.pth
-  use_fp16: True
-  params:
-    embed_dim: 3
-    n_embed: 8192
-    ddconfig:
-      double_z: False
-      z_channels: 3
-      resolution: 256
-      in_channels: 3
-      out_ch: 3
-      ch: 128
-      ch_mult: [1, 2, 4]
-      num_res_blocks: 2
-      attn_resolutions: []
-      dropout: 0.0
-      padding_mode: zeros
+# autoencoder:
+#   target: ldm.models.autoencoder.VQModelTorch
+#   ckpt_path: weights/autoencoder_vq_f4.pth
+#   use_fp16: True
+#   params:
+#     embed_dim: 3
+#     n_embed: 8192
+#     ddconfig:
+#       double_z: False
+#       z_channels: 3
+#       resolution: 256
+#       in_channels: 3
+#       out_ch: 3
+#       ch: 128
+#       ch_mult: [1, 2, 4]
+#       num_res_blocks: 2
+#       attn_resolutions: []
+#       dropout: 0.0
+#       padding_mode: zeros
 
 degradation:
   sf: 4

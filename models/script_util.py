@@ -14,7 +14,8 @@ def create_gaussian_diffusion(
     kappa=1,
     etas_end=0.99,
     schedule_kwargs=None,
-    weighted_mse=False,
+    # weighted_mse=False,
+    loss_type, # 'mse', 'weighted_mse', or 'l1'
     predict_type='xstart',
     timestep_respacing=None,
     scale_factor=None,
@@ -42,12 +43,24 @@ def create_gaussian_diffusion(
         model_mean_type = gd.ModelMeanType.RESIDUAL
     else:
         raise ValueError(f'Unknown Predicted type: {predict_type}')
+    
+    # Determine the loss type enum based on the loss_type string
+    if loss_type.lower() == 'mse': # Use lower() for case-insensitivity
+        actual_loss_type = gd.LossType.MSE
+    elif loss_type.lower() == 'weighted_mse':
+        actual_loss_type = gd.LossType.WEIGHTED_MSE
+    elif loss_type.lower() == 'l1':
+        actual_loss_type = gd.LossType.L1
+    else:
+        raise ValueError(f"Unknown loss_type: {loss_type}. Expected 'mse', 'weighted_mse', or 'l1'.")
+    
+    
     return SpacedDiffusion(
         use_timesteps=space_timesteps(steps, timestep_respacing),
         sqrt_etas=sqrt_etas,
         kappa=kappa,
         model_mean_type=model_mean_type,
-        loss_type=gd.LossType.WEIGHTED_MSE if weighted_mse else gd.LossType.MSE,
+        loss_type=actual_loss_type, # Use the determined enum
         scale_factor=scale_factor,
         normalize_input=normalize_input,
         sf=sf,
