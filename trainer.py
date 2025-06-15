@@ -771,7 +771,7 @@ class TrainerDifIR(TrainerBase):
         context = torch.cuda.amp.autocast if self.configs.train.use_amp else nullcontext
         with context():
             losses, z_t, z0_pred = dif_loss_wrapper()
-            losses['loss'] = losses['mse']
+            losses['loss'] = losses['L1'] #use the L1 loss as the main loss
             loss = losses['loss'].mean() / num_grad_accumulate
         if self.amp_scaler is None:
             loss.backward()

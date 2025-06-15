@@ -2,7 +2,7 @@ trainer:
   target: trainer.TrainerDifIR
 
 four_channel_autoencoder:
-  ckpt_path: ./weights/your_4channel_autoencoderkl.pth
+  ckpt_path: "checkpoints/sen2naip_vae_from_opensr.ckpt"
   trainable: false
   compile: false
   params:
@@ -60,25 +60,6 @@ diffusion:
     normalize_input: True
     latent_flag: True
 
-# autoencoder:
-#   target: ldm.models.autoencoder.VQModelTorch
-#   ckpt_path: weights/autoencoder_vq_f4.pth
-#   use_fp16: True
-#   params:
-#     embed_dim: 3
-#     n_embed: 8192
-#     ddconfig:
-#       double_z: False
-#       z_channels: 3
-#       resolution: 256
-#       in_channels: 3
-#       out_ch: 3
-#       ch: 128
-#       ch_mult: [1, 2, 4]
-#       num_res_blocks: 2
-#       attn_resolutions: []
-#       dropout: 0.0
-#       padding_mode: zeros
 
 degradation:
   sf: 4
