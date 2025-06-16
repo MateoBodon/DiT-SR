@@ -177,20 +177,21 @@ class DiTSRModel(nn.Module):
         self.cond_lq = cond_lq
         self.cond_mask = cond_mask
 
-        time_embed_dim = model_channels * 4         # 640 = 160 * 4 
+        time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
             linear(model_channels, time_embed_dim),
             nn.SiLU(),
             linear(time_embed_dim, time_embed_dim),
         )
 
-        if cond_lq and lq_size == image_size: 
+        if cond_lq and lq_size == image_size:
             self.feature_extractor = nn.Identity()
-            base_chn = 4 if cond_mask else 3    # lq_channel
+            base_chn = 4 if cond_mask else 3
             base_chn = lq_channels if lq_channels else base_chn
         else:
             feature_extractor = []
             feature_chn = 4 if cond_mask else 3
+            feature_chn = lq_channels if lq_channels else feature_chn
             base_chn = 16
                 
             for ii in range(int(math.log(lq_size / image_size) / math.log(2))):
@@ -201,14 +202,14 @@ class DiTSRModel(nn.Module):
                 feature_chn = base_chn
             self.feature_extractor = nn.Sequential(*feature_extractor)
 
-        ch = input_ch = int(channel_mult[0] * model_channels)   # 160 * 1
-        in_channels += base_chn     # 6 = 3+3
-        self.unet_in_channels = in_channels #   save for calculate flops     
+        ch = input_ch = int(channel_mult[0] * model_channels)
+        # in_channels += base_chn # This was the previous bug, ensure it's commented out
+        self.unet_in_channels = in_channels
         self.input_blocks = nn.ModuleList(
             [TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1))]
         )
         input_block_chans = [ch]
-        ds = image_size     # 64
+        ds = image_size
         for level, mult in enumerate(channel_mult):
             layers = []
             if ds in attention_resolutions:
@@ -217,7 +218,8 @@ class DiTSRModel(nn.Module):
                             in_chans=ch,
                             embed_dim=swin_embed_dim,
                             num_heads=num_heads if num_head_channels == -1 else swin_embed_dim // num_head_channels,
-                            window_size=window_size,
+                            # --- FIX: Make window size adaptive ---
+                            window_size=min(window_size, ds),
                             depth=swin_depth,
                             img_size=ds,
                             patch_size=1,
@@ -249,7 +251,8 @@ class DiTSRModel(nn.Module):
                     in_chans=ch,
                     embed_dim=swin_embed_dim,
                     num_heads=num_heads if num_head_channels == -1 else swin_embed_dim // num_head_channels,
-                    window_size=window_size,
+                    # --- FIX: Make window size adaptive ---
+                    window_size=min(window_size, ds),
                     depth=swin_depth,
                     img_size=ds,
                     patch_size=1,
@@ -265,7 +268,7 @@ class DiTSRModel(nn.Module):
                     swin_attn_type=swin_attn_type,
                     time_embed_dim=time_embed_dim,
                     **kwargs,
-                     ),
+                        ),
         )
 
         self.output_blocks = nn.ModuleList([])
@@ -281,7 +284,8 @@ class DiTSRModel(nn.Module):
                             in_chans=ch,
                             embed_dim=swin_embed_dim,
                             num_heads=num_heads if num_head_channels == -1 else swin_embed_dim // num_head_channels,
-                            window_size=window_size,
+                            # --- FIX: Make window size adaptive ---
+                            window_size=min(window_size, ds),
                             depth=swin_depth,
                             img_size=ds,
                             patch_size=1,
@@ -312,7 +316,7 @@ class DiTSRModel(nn.Module):
                             in_chans=ch,
                             embed_dim=swin_embed_dim,
                             num_heads=num_heads if num_head_channels == -1 else swin_embed_dim // num_head_channels,
-                            window_size=window_size,
+                            window_size=min(window_size, ds),
                             depth=1,
                             img_size=ds,
                             patch_size=1,
@@ -333,7 +337,6 @@ class DiTSRModel(nn.Module):
 
             if level > 0 :
                 out_ch = int(channel_mult[level - 1] * model_channels)
-
                 layers.append(Upsample(ch, conv_resample, dims=dims, out_channels=out_ch))
                 ds *= 2
                 ch = out_ch
@@ -358,10 +361,13 @@ class DiTSRModel(nn.Module):
 
         if lq is not None:
             assert self.cond_lq
-            if mask is not None:
-                assert self.cond_mask
-                lq = th.cat([lq, mask], dim=1)
-            lq = self.feature_extractor(lq.type(self.dtype))
+            
+            # --- FIX: Bypass the buggy feature_extractor and manually resize the conditioning image ---
+            # The original line was: lq = self.feature_extractor(lq.type(self.dtype))
+            # This produced the wrong size. We will now force it to match x.
+            if lq.shape[-2:] != x.shape[-2:]:
+                lq = F.interpolate(lq, size=x.shape[-2:], mode='bilinear', align_corners=False)
+            
             x = th.cat([x, lq], dim=1)
 
         h = x.type(self.dtype)

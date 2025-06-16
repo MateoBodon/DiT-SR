@@ -2,8 +2,8 @@
 """Latent diffusion model trained in RGBN optical remote sensing imagery"""
 
 import sys
-from opensr_model.srmodel import *
-from opensr_model import *
+#from opensr_model.srmodel import *
+#from opensr_model import *
 
 if sys.version_info >= (3, 8):
     from importlib import metadata as importlib_metadata

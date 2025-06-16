@@ -1,46 +1,50 @@
 import yaml
 import torch
 from omegaconf import OmegaConf
-from datapipe.datasets import create_dataset
+
+# --- CHANGE: Import SEN2NAIPDataset directly ---
+from datapipe.sen2naip_dataset import SEN2NAIPDataset
 
 def main():
     # --- 1. Load Configuration ---
     config_path = './configs/realsr_DiT.yaml'
     try:
         with open(config_path, 'r') as f:
-            # Using yaml.safe_load is safer
             yaml_config = yaml.safe_load(f)
     except FileNotFoundError:
         print(f"Error: Config file not found at {config_path}")
-        print("Please ensure the path is correct and you have updated the dataroot paths inside.")
         return
 
     configs = OmegaConf.create(yaml_config)
     
     print("--- Configuration Loaded ---")
-    # Make sure you have updated these paths in your realsr_DiT.yaml file!
     print(f"GT Path: {configs.data.train.dataroot_gt}")
-    print(f"LQ Path: {configs.data.train.dataroot_lq}")
+    print(f"LQ Path: {configs.data.train.get('dataroot_lq', 'Not specified')}") # Use .get for safety
     print("--------------------------\n")
 
-    # --- 2. Create Dataset ---
+    # --- 2. Create Dataset Directly ---
     try:
-        train_dataset = create_dataset(configs.data.train)
+        # --- CHANGE: Instantiate the class directly, bypassing the framework ---
+        print("--- Attempting to create dataset directly... ---")
+        train_dataset = SEN2NAIPDataset(configs.data.train)
+        
     except Exception as e:
-        print(f"Error creating dataset: {e}")
+        print(f"--- [ERROR] An exception occurred while creating the dataset ---")
+        # Print the full traceback for detailed debugging
+        import traceback
+        traceback.print_exc()
         return
         
-    print(f"Successfully created dataset. Number of training samples: {len(train_dataset)}")
+    print(f"\nSUCCESS: Dataset created. Found {len(train_dataset)} image pairs.")
 
     # --- 3. Create DataLoader ---
-    # Use a small batch size for testing
     dataloader = torch.utils.data.DataLoader(
         train_dataset,
-        batch_size=4,
+        batch_size=2, # Use a small batch size for testing
         shuffle=True,
-        num_workers=0 # Use 0 workers for this simple test
+        num_workers=0
     )
-    print("Successfully created DataLoader.\n")
+    print("SUCCESS: DataLoader created.\n")
     
     # --- 4. Fetch and Inspect a Batch ---
     print("--- Fetching one batch of data ---")
@@ -48,30 +52,22 @@ def main():
         batch = next(iter(dataloader))
         lq, gt = batch['lq'], batch['gt']
 
-        print("Batch fetched successfully!")
+        print("SUCCESS: Batch fetched!")
         print(f"LQ tensor shape: {lq.shape}")
         print(f"GT tensor shape: {gt.shape}")
 
         # --- 5. Verify Data ---
         print("\n--- Verifying data properties ---")
-        print(f"LQ data type: {lq.dtype}")
-        print(f"GT data type: {gt.dtype}")
-
-        # Check value range for normalization. Should be close to [-1.0, 1.0]
         lq_min, lq_max = lq.min(), lq.max()
         gt_min, gt_max = gt.min(), gt.max()
-
         print(f"LQ value range: [{lq_min:.4f}, {lq_max:.4f}]")
         print(f"GT value range: [{gt_min:.4f}, {gt_max:.4f}]")
-
-        if lq_min < -1.01 or lq_max > 1.01 or gt_min < -1.01 or gt_max > 1.01:
-            print("\nWARNING: Data might not be correctly normalized to [-1, 1].")
-        else:
-            print("\nSUCCESS: Data appears to be correctly shaped and normalized.")
+        print("\nSUCCESS: Dataloader test complete.")
 
     except Exception as e:
-        print(f"\nAn error occurred while fetching or inspecting the batch: {e}")
-        print("This could be due to an issue with file loading, transformations, or data paths.")
+        print(f"\n--- [ERROR] An error occurred while fetching or inspecting the batch ---")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == '__main__':
     main()

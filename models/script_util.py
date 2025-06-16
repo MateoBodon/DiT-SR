@@ -2,70 +2,49 @@ import argparse
 import inspect
 
 from . import gaussian_diffusion as gd
-from .respace import SpacedDiffusion, space_timesteps, SpacedDiffusionDDPM
+from .respace import SpacedDiffusion, space_timesteps
 
 def create_gaussian_diffusion(
-    *,
-    normalize_input,
-    schedule_name,
-    sf=4,
-    min_noise_level=0.01,
-    steps=1000,
-    kappa=1,
-    etas_end=0.99,
-    schedule_kwargs=None,
-    # weighted_mse=False,
-    loss_type, # 'mse', 'weighted_mse', or 'l1'
-    predict_type='xstart',
-    timestep_respacing=None,
-    scale_factor=None,
-    latent_flag=True,
+        *,
+        steps,
+        model_mean_type,
+        loss_type,
+        schedule_name,
+        schedule_kwargs,
+        sf,
+        kappa,
+        etas_end,
+        min_noise_level,
+        normalize_input,
+        latent_flag,
+        **kwargs # Catch any other unused args
 ):
+    """
+    Creates the custom Gaussian diffusion process based on the YAML configuration.
+    This version is corrected to pass the right arguments to the right functions.
+    """
+    # Get the eta schedule as defined in the YAML
     sqrt_etas = gd.get_named_eta_schedule(
-            schedule_name,
-            num_diffusion_timesteps=steps,
-            min_noise_level=min_noise_level,
-            etas_end=etas_end,
-            kappa=kappa,
-            kwargs=schedule_kwargs,
-            )
-    if timestep_respacing is None:
-        timestep_respacing = steps
-    else:
-        assert isinstance(timestep_respacing, int)
-    if predict_type == 'xstart':
-        model_mean_type = gd.ModelMeanType.START_X
-    elif predict_type == 'epsilon':
-        model_mean_type = gd.ModelMeanType.EPSILON
-    elif predict_type == 'epsilon_scale':
-        model_mean_type = gd.ModelMeanType.EPSILON_SCALE
-    elif predict_type == 'residual':
-        model_mean_type = gd.ModelMeanType.RESIDUAL
-    else:
-        raise ValueError(f'Unknown Predicted type: {predict_type}')
-    
-    # Determine the loss type enum based on the loss_type string
-    if loss_type.lower() == 'mse': # Use lower() for case-insensitivity
-        actual_loss_type = gd.LossType.MSE
-    elif loss_type.lower() == 'weighted_mse':
-        actual_loss_type = gd.LossType.WEIGHTED_MSE
-    elif loss_type.lower() == 'l1':
-        actual_loss_type = gd.LossType.L1
-    else:
-        raise ValueError(f"Unknown loss_type: {loss_type}. Expected 'mse', 'weighted_mse', or 'l1'.")
-    
-    
-    return SpacedDiffusion(
-        use_timesteps=space_timesteps(steps, timestep_respacing),
+        schedule_name=schedule_name,
+        num_diffusion_timesteps=steps,
+        min_noise_level=min_noise_level,
+        etas_end=etas_end,
+        kappa=kappa,
+        kwargs=schedule_kwargs
+    )
+
+    # Directly create and return the GaussianDiffusion object with its specific arguments
+    diffusion = gd.GaussianDiffusion(
         sqrt_etas=sqrt_etas,
         kappa=kappa,
-        model_mean_type=model_mean_type,
-        loss_type=actual_loss_type, # Use the determined enum
-        scale_factor=scale_factor,
-        normalize_input=normalize_input,
+        model_mean_type=getattr(gd.ModelMeanType, model_mean_type),
+        loss_type=getattr(gd.LossType, loss_type),
         sf=sf,
-        latent_flag=latent_flag,
+        normalize_input=normalize_input,
+        latent_flag=latent_flag
     )
+    
+    return diffusion
 
 def create_gaussian_diffusion_ddpm(
     *,

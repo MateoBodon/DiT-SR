@@ -7,7 +7,7 @@ import torch as th
 import torch.nn.functional as F
 
 from .basic_ops import mean_flat
-from .respace import ModelMeanType
+# from .respace import ModelMeanType # <-- THIS LINE IS DELETED
 from .losses import normal_kl, discretized_gaussian_log_likelihood
 
 from ldm.models.autoencoder import AutoencoderKLTorch
@@ -78,6 +78,7 @@ class ModelMeanType(enum.Enum):
 
 class LossType(enum.Enum):
     MSE = enum.auto()           # simplied MSE
+    L1 = enum.auto()            # L1 loss
     WEIGHTED_MSE = enum.auto()  # weighted mse derived from KL
 
 class ModelVarTypeDDPM(enum.Enum):
@@ -140,9 +141,10 @@ class GaussianDiffusion:
         self.latent_flag = latent_flag
         self.sf = sf
 
-        # Use float64 for accuracy.
-        self.sqrt_etas = sqrt_etas
-        self.etas = sqrt_etas**2
+        # --- FIX: Cast to float32 for MPS compatibility ---
+        self.sqrt_etas = sqrt_etas.astype(np.float32)
+        self.etas = self.sqrt_etas**2
+        
         assert len(self.etas.shape) == 1, "etas must be 1-D"
         assert (self.etas > 0).all() and (self.etas <= 1).all()
 
@@ -150,18 +152,14 @@ class GaussianDiffusion:
         self.etas_prev = np.append(0.0, self.etas[:-1])
         self.alpha = self.etas - self.etas_prev
 
-        # calculations for posterior q(x_{t-1} | x_t, x_0)
         self.posterior_variance = kappa**2 * self.etas_prev / self.etas * self.alpha
         self.posterior_variance_clipped = np.append(
                 self.posterior_variance[1], self.posterior_variance[1:]
                 )
-        # log calculation clipped because the posterior variance is 0 at the
-        # beginning of the diffusion chain.
         self.posterior_log_variance_clipped = np.log(self.posterior_variance_clipped)
         self.posterior_mean_coef1 = self.etas_prev / self.etas
         self.posterior_mean_coef2 = self.alpha / self.etas
 
-        # weight for the mse loss
         if model_mean_type in [ModelMeanType.START_X, ModelMeanType.RESIDUAL]:
             weight_loss_mse = 0.5 / self.posterior_variance_clipped * (self.alpha / self.etas)**2
         elif model_mean_type in [ModelMeanType.EPSILON, ModelMeanType.EPSILON_SCALE]  :
@@ -171,7 +169,6 @@ class GaussianDiffusion:
         else:
             raise NotImplementedError(model_mean_type)
 
-        # self.weight_loss_mse = np.append(weight_loss_mse[1],  weight_loss_mse[1:])
         self.weight_loss_mse = weight_loss_mse
 
     def q_mean_variance(self, x_start, y, t):
@@ -503,22 +500,6 @@ class GaussianDiffusion:
 
     @th.no_grad()
     def encode_first_stage(self, y_pixels, first_stage_model, up_sample=False):
-        # data_dtype = y.dtype
-        # model_dtype = next(first_stage_model.parameters()).dtype
-        # if up_sample and self.sf != 1:
-        #     y = F.interpolate(y, scale_factor=self.sf, mode='bicubic')
-        # if first_stage_model is None:
-        #     return y
-        # else:
-        #     if not model_dtype == data_dtype:
-        #         y = y.type(model_dtype)
-        #     with th.no_grad():
-        #         z_y = first_stage_model.encode(y)
-        #         out = z_y * self.scale_factor
-        #     if not model_dtype == data_dtype:
-        #         out = out.type(data_dtype)
-        #     return out
-
         """
         Encodes the input image y_pixels into a latent representation z_y.
         Optionally upsamples y_pixels before encoding if it's an LR image.
@@ -529,17 +510,11 @@ class GaussianDiffusion:
         :return: Latent representation of y_pixels.
         """
         if first_stage_model is None:
-            # If no AE, the "latent" is the image itself (or this is an error if latent space is expected)
-            # This path might need careful thought based on how DiT conditions without an AE for 'y'.
-            # For DiT-SR, 'y' is likely always pixel-space if no separate conditioning encoder is used.
-            # However, the srmodel.py from opensr-model *does* encode its LR condition.
-            # Let's assume if first_stage_model is provided, we always encode 'y'.
             raise ValueError("first_stage_model (AutoencoderKL) is required to encode the conditioning image.")
 
         y_pixels = y_pixels.to(next(first_stage_model.parameters()).device)
 
         if up_sample:
-            # Upsample y_pixels to the resolution expected by the AutoencoderKL's encoder.
             # The AutoencoderKL is typically trained on HR images (e.g., 256x256).
             # If 'y' is LR (e.g., 64x64), it needs to be upsampled to 256x256 before encoding.
             target_res = first_stage_model.encoder.resolution # Assuming AE stores its target input resolution
@@ -555,16 +530,6 @@ class GaussianDiffusion:
         # Encode using AutoencoderKL: encode -> sample
         posterior = first_stage_model.encode(y_pixels_upsampled)
         z_y = posterior.sample()
-
-        # Scaling: As with decode, the AutoencoderKL from opensr-model doesn't seem to have an explicit scale_factor
-        # for its latents that requires external application after .sample().
-        # If a VQGAN was used previously, it might have had e.g. self.model.quantize.scale_factor
-        # If such scaling is needed by the *diffusion model's formulation* for condition latents,
-        # it would come from a diffusion model attribute (e.g., self.scale_factor if it was meant for all latents).
-        # For now, assume no external scaling is needed for z_y from this AutoencoderKL.
-        # if hasattr(self, 'scale_factor') and self.scale_factor != 1.0:
-        #    z_y = z_y * self.scale_factor
-
         return z_y
 
     def prior_sample(self, y, noise=None):
@@ -581,42 +546,33 @@ class GaussianDiffusion:
 
         return y + _extract_into_tensor(self.kappa * self.sqrt_etas, t, y.shape) * noise
 
-def training_losses(
-    self, model, x_start, y, t,
-    first_stage_model=None,
-    model_kwargs=None,
-    noise=None,
-):
-    """
-    Compute training losses for a single timestep.
+    def training_losses(
+        self, model, x_start, y, t,
+        first_stage_model=None,
+        model_kwargs=None,
+        noise=None,
+    ):
+        """
+        Compute training losses for a single timestep.
+        """
+        if model_kwargs is None:
+            model_kwargs = {}
 
-    :param model: the model to evaluate loss on.
-    :param first_stage_model: autoencoder model
-    :param x_start: the [N x C x H x W] tensor of ground truth images.
-    :param y: the [N x C x H x W] tensor of degraded (low-quality) images.
-    :param t: a batch of timestep indices.
-    :param model_kwargs: extra keyword arguments for the model, e.g., conditioning.
-    :param noise: if specified, the specific Gaussian noise to try to remove.
-    :return: a dict with loss terms, noisy latent z_t, and predicted latent z_0.
-    """
-    if model_kwargs is None:
-        model_kwargs = {}
+        # Encode low-quality and ground truth images into latent space
+        z_y = self.encode_first_stage(y, first_stage_model, up_sample=True)
+        z_start = self.encode_first_stage(x_start, first_stage_model, up_sample=False)
+        
+        # --- FIX: Pass the LATENT version of the LR image to the model ---
+        model_kwargs['lq'] = z_y
 
-    # Encode low-quality and ground truth images into latent space
-    z_y = self.encode_first_stage(y, first_stage_model, up_sample=True)
-    z_start = self.encode_first_stage(x_start, first_stage_model, up_sample=False)
+        if noise is None:
+            noise = torch.randn_like(z_start)
 
-    if noise is None:
-        noise = torch.randn_like(z_start)
+        # Diffuse ground truth latent using q-sample
+        z_t = self.q_sample(z_start, z_y, t, noise=noise)
 
-    # Diffuse ground truth latent using q-sample
-    z_t = self.q_sample(z_start, z_y, t, noise=noise)
-
-    terms = {}
-
-    if self.loss_type in [LossType.MSE, LossType.WEIGHTED_MSE]:
-        model_output = model(self._scale_input(z_t, t), t, **model_kwargs)
-
+        terms = {}
+        
         target = {
             ModelMeanType.START_X: z_start,
             ModelMeanType.RESIDUAL: z_y - z_start,
@@ -624,46 +580,50 @@ def training_losses(
             ModelMeanType.EPSILON_SCALE: noise * self.kappa * _extract_into_tensor(self.sqrt_etas, t, noise.shape),
         }[self.model_mean_type]
 
+        model_output = model(self._scale_input(z_t, t), t, **model_kwargs)
         assert model_output.shape == target.shape == z_start.shape
-        terms["mse"] = mean_flat((target - model_output) ** 2)
-
-        if self.model_mean_type == ModelMeanType.EPSILON_SCALE:
-            terms["mse"] /= (self.kappa ** 2 * _extract_into_tensor(self.etas, t, t.shape))
-
-        if self.loss_type == LossType.WEIGHTED_MSE:
+        
+        if self.loss_type == LossType.MSE:
+            terms["mse"] = mean_flat((target - model_output) ** 2)
+            terms["l1"] = mean_flat(torch.abs(target - model_output))
+            
+        elif self.loss_type == LossType.L1:
+            terms["l1"] = mean_flat(torch.abs(target - model_output))
+            terms["mse"] = mean_flat((target - model_output) ** 2)
+            
+        elif self.loss_type == LossType.WEIGHTED_MSE:
             weights = _extract_into_tensor(self.weight_loss_mse, t, t.shape)
-            terms["mse"] *= weights
-
-    else:
-        raise NotImplementedError(self.loss_type)
-
-    # Predict latent start point depending on mean type
-    if self.model_mean_type == ModelMeanType.START_X:
-        pred_zstart = model_output
-    elif self.model_mean_type == ModelMeanType.EPSILON:
-        pred_zstart = self._predict_xstart_from_eps(x_t=z_t, y=z_y, t=t, eps=model_output)
-    elif self.model_mean_type == ModelMeanType.RESIDUAL:
-        pred_zstart = self._predict_xstart_from_residual(y=z_y, residual=model_output)
-    elif self.model_mean_type == ModelMeanType.EPSILON_SCALE:
-        pred_zstart = self._predict_xstart_from_eps_scale(x_t=z_t, y=z_y, t=t, eps=model_output)
-    else:
-        raise NotImplementedError(self.model_mean_type)
-
-    return terms, z_t, pred_zstart
-
-
-def _scale_input(self, inputs, t):
-    if self.normalize_input:
-        if self.latent_flag:
-            # Latent code normalization based on diffusion timestep
-            std = torch.sqrt(_extract_into_tensor(self.etas, t, inputs.shape) * self.kappa ** 2 + 1)
-            inputs_norm = inputs / std
+            terms["mse"] = mean_flat(((target - model_output) ** 2) * weights)
+            terms["l1"] = mean_flat(torch.abs(target - model_output) * weights)
         else:
-            inputs_max = _extract_into_tensor(self.sqrt_etas, t, inputs.shape) * self.kappa * 3 + 1
-            inputs_norm = inputs / inputs_max
-    else:
-        inputs_norm = inputs
-    return inputs_norm
+            raise NotImplementedError(self.loss_type)
+
+        if self.model_mean_type == ModelMeanType.START_X:
+            pred_zstart = model_output
+        elif self.model_mean_type == ModelMeanType.EPSILON:
+            pred_zstart = self._predict_xstart_from_eps(x_t=z_t, y=z_y, t=t, eps=model_output)
+        elif self.model_mean_type == ModelMeanType.RESIDUAL:
+            pred_zstart = self._predict_xstart_from_residual(y=z_y, residual=model_output)
+        elif self.model_mean_type == ModelMeanType.EPSILON_SCALE:
+            pred_zstart = self._predict_xstart_from_eps_scale(x_t=z_t, y=z_y, t=t, eps=model_output)
+        else:
+            raise NotImplementedError(self.model_mean_type)
+
+        return terms, z_t, pred_zstart
+
+
+    def _scale_input(self, inputs, t):
+        if self.normalize_input:
+            if self.latent_flag:
+                # Latent code normalization based on diffusion timestep
+                std = torch.sqrt(_extract_into_tensor(self.etas, t, inputs.shape) * self.kappa ** 2 + 1)
+                inputs_norm = inputs / std
+            else:
+                inputs_max = _extract_into_tensor(self.sqrt_etas, t, inputs.shape) * self.kappa * 3 + 1
+                inputs_norm = inputs / inputs_max
+        else:
+            inputs_norm = inputs
+        return inputs_norm
 
 
 class GaussianDiffusionDDPM:
@@ -1294,4 +1254,3 @@ class GaussianDiffusionDDPM:
                 z_y = first_stage_model.encode(y)
                 out = z_y * self.scale_factor
                 return out.type(ori_dtype)
-

@@ -13,18 +13,20 @@ four_channel_autoencoder:
       resolution: 256
       in_channels: 4
       out_ch: 4
+ # --- CORRECTED ARCHITECTURE PARAMETERS ---
       ch: 128
-      ch_mult: [1, 2]
+      ch_mult: [ 1, 2, 4, 4 ] # This creates the larger 512-channel layers
       num_res_blocks: 2
-      attn_resolutions: []
+      # ---
+      attn_resolutions: [16] # updated
       dropout: 0.0
 
 model:
   target: models.unet.DiTSRModel
   ckpt_path: ~
   params:
-    image_size: 64
-    in_channels: 4
+    image_size: 16
+    in_channels: 8
     model_channels: 160
     out_channels: 4
     attention_resolutions: [64, 32, 16, 8]
@@ -36,10 +38,12 @@ model:
     num_head_channels: 32
     swin_depth: 6
     swin_embed_dim: 192
-    window_size: 8
+    window_size: 4
     mlp_ratio: 4
     cond_lq: True
     lq_size: 64
+    # --- FIX: Explicitly tell the model our LR image has 4 channels ---
+    lq_channels: 4
 
 diffusion:
   target: models.script_util.create_gaussian_diffusion
@@ -52,10 +56,11 @@ diffusion:
     steps: 15
     min_noise_level: 0.04
     kappa: 2.0
-    # weighted_mse: False
-    loss_type: L1 # set the loss type to L1
-    predict_type: xstart
-    timestep_respacing: ~
+    loss_type: L1
+    #predict_type: xstart
+    # --- FIX: Set the timestep respacing ---
+    model_mean_type: START_X
+    timestep_respacing: "ddim15"
     scale_factor: 1.0
     normalize_input: True
     latent_flag: True
@@ -86,40 +91,35 @@ degradation:
 data:
   train:
     name: SEN2NAIP_Train
-    type: SEN2NAIPDataset # Name of your new class
-    dataroot_gt: /path/to/your/sen2naip_dataset/train/HR_NAIP_patches_256x256/
-    dataroot_lq: /path/to/your/sen2naip_dataset/train/LR_S2like_patches_64x64/
-    # Or if using a meta file:
-    # meta_info_file: /path/to/your/sen2naip_train_meta.txt 
-    # dataroot_gt: /path_prefix_for_gt_in_meta_file/ (can be empty if paths in meta are absolute)
-    # dataroot_lq: /path_prefix_for_lq_in_meta_file/
-    filename_tmpl: '{}' # If scanning folders and files are directly named, e.g. 0001.tif
-    io_backend: {type: disk} # For local file system
+    type: SEN2NAIPDataset
+    # Point to the new train directory
+    dataroot_gt: /Volumes/SSD/GIS/cross-sensor/train/
+    dataroot_lq: ~ # No longer needed
+    io_backend: {type: disk}
 
-    gt_size: 256      # HR patch size for training
-    scale: 4          # Upscaling factor
+    gt_size: 256
+    scale: 4
     use_hflip: true
     use_rot: true
-
-    num_worker_per_gpu: 4 
-    batch_size_per_gpu: 2 # Start small with 4-channel data
+    num_worker_per_gpu: 4
+    batch_size_per_gpu: 2
     dataset_enlarge_ratio: 1
     phase: train
 
   val:
     name: SEN2NAIP_Val
     type: SEN2NAIPDataset
-    dataroot_gt: /path/to/your/sen2naip_dataset/val/HR_NAIP_patches/
-    dataroot_lq: /path/to/your/sen2naip_dataset/val/LR_S2like_patches/
-    # meta_info_file: /path/to/your/sen2naip_val_meta.txt
+    # Point to the new val directory
+    dataroot_gt: /Volumes/SSD/GIS/cross-sensor/val/
+    dataroot_lq: ~ # No longer needed
     io_backend: {type: disk}
     scale: 4
-    phase: val # No random crop/augmentation usually for validation
-    gt_size: 256 # Validation patches might be loaded as is or center-cropped
+    phase: val
+    gt_size: 256
 
 train:
-  lr: 5e-5
-  lr_min: 2e-5
+  lr: 0.00005
+  lr_min: 0.00002
   lr_schedule: ~
   warmup_iterations: 5000
   batch: [64, 8]

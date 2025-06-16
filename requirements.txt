@@ -1,20 +1,48 @@
-torch==2.1.1
-xformers==0.0.23
-scipy==1.9.3
+# torch==2.1.1
+# xformers==0.0.23
+# scipy==1.9.3
+# numpy
+# opencv-python
+# matplotlib
+# timm
+# pandas
+# pillow
+# scikit-learn
+# scikit-image
+# lpips
+# loguru
+# omegaconf
+# six
+# tqdm
+# albumentations
+# einops
+# imageio
+# transformers
+# PyTorch and Vision
+torch>=1.12.1
+torchvision>=0.13.1
+
+# Image/Data Handling
 numpy
+Pillow
 opencv-python
-matplotlib
-timm
-pandas
-pillow
-scikit-learn
 scikit-image
-lpips
-loguru
-omegaconf
-six
-tqdm
-albumentations
-einops
 imageio
-transformers
+einops
+rasterio
+
+# Data Augmentation
+albumentations
+
+# Model & Training Utilities
+omegaconf
+loguru
+lpips
+tqdm
+PyYAML
+timm
+
+# BasicSR dependencies
+yapf
+lmdb
+future

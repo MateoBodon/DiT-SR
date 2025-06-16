@@ -1,73 +1,95 @@
 import torch
 from torch.utils import data as data
 import numpy as np
-import rasterio # For reading GeoTIFFs
+import rasterio
 import os
+import glob
+import time
 
-# It's good practice to ensure the utility can be found.
-# This assumes open_sr_utils is in the project root.
-from open_sr_utils.data_utils import linear_transform_4b
-
-from basicsr.data.data_util import paired_paths_from_folder
+# --- FIX: Import the registry ---
+from basicsr.utils.registry import DATASET_REGISTRY
 from basicsr.data.transforms import augment, paired_random_crop
 from basicsr.utils import FileClient
+from open_sr_utils.data_utils import linear_transform_4b
 
+# --- FIX: Add the decorator here ---
+@DATASET_REGISTRY.register()
 class SEN2NAIPDataset(data.Dataset):
     """
     A robust dataset for loading 4-channel SEN2NAIP GeoTIFF data.
-    This version uses rasterio for reliable 4-channel TIFF loading.
+    This version is adapted for a directory structure where each ROI
+    has its own folder containing lr.tif and hr.tif.
     """
     def __init__(self, opt):
         super(SEN2NAIPDataset, self).__init__()
         self.opt = opt
         self.file_client = None
         self.io_backend_opt = opt['io_backend']
-        
-        self.gt_folder, self.lq_folder = self.opt['dataroot_gt'], self.opt['dataroot_lq']
-        
-        # Scan for paired paths
-        self.paths = paired_paths_from_folder(
-            [self.lq_folder, self.gt_folder], ['lq', 'gt'], self.opt.get('filename_tmpl', '{}')
-        )
+        self.data_root = self.opt['dataroot_gt']
+        self.paths = []
 
+        if not os.path.isdir(self.data_root):
+            raise ValueError(f"Data root path is not a directory: {self.data_root}")
+
+        roi_dirs = sorted([d for d in os.listdir(self.data_root) if not d.startswith('.')])
+
+        for roi_dir_name in roi_dirs:
+            roi_path = os.path.join(self.data_root, roi_dir_name)
+            if not os.path.isdir(roi_path):
+                continue
+
+            lq_path = os.path.join(roi_path, 'lr.tif')
+            gt_path = os.path.join(roi_path, 'hr.tif')
+
+            if os.path.exists(lq_path) and os.path.exists(gt_path):
+                self.paths.append({'lq_path': lq_path, 'gt_path': gt_path})
+
+        if not self.paths:
+            raise ValueError(
+                f"No image pairs found in {self.data_root}. Please check the path and folder structure."
+            )
+
+
+    # Replace the existing __getitem__ method with this final version
     def __getitem__(self, index):
         if self.file_client is None:
             self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
-
         scale = self.opt['scale']
-        
-        # --- Load LQ and GT images using rasterio ---
         lq_path = self.paths[index]['lq_path']
         gt_path = self.paths[index]['gt_path']
-
         try:
             with rasterio.open(lq_path) as src:
-                # rasterio reads as (channels, height, width)
                 img_lq = src.read().astype(np.float32)
             with rasterio.open(gt_path) as src:
                 img_gt = src.read().astype(np.float32)
         except Exception as e:
             raise IOError(f"Error opening or reading GeoTIFF file at {lq_path} or {gt_path}. Error: {e}")
 
-        # --- Data Augmentation (for training phase) ---
+        # --- FIX: Convert raw pixel values to reflectance (0.0 - 1.0 range) ---
+        img_lq = img_lq / 10000.0
+        img_gt = img_gt / 10000.0
+
+        # Transpose from (C, H, W) to (H, W, C) for basicsr
+        img_lq = img_lq.transpose(1, 2, 0).copy()
+        img_gt = img_gt.transpose(1, 2, 0).copy()
+
         if self.opt['phase'] == 'train':
             gt_size = self.opt['gt_size']
-            
-            # Paired random crop. Input should be (C, H, W) numpy arrays
             img_gt, img_lq = paired_random_crop(img_gt, img_lq, gt_size, scale, gt_path)
-            
-            # Augment (flip, rotation). Input should be numpy arrays.
             img_gt, img_lq = augment([img_gt, img_lq], self.opt['use_hflip'], self.opt['use_rot'])
 
-        # --- Convert to Tensor ---
-        # Data is already in (C, H, W) format from rasterio, so just convert to tensor
+        # Transpose back to (C, H, W) for PyTorch
+        img_lq = img_lq.transpose(2, 0, 1)
+        img_gt = img_gt.transpose(2, 0, 1)
+
+        # Convert to tensor
         img_gt = torch.from_numpy(np.ascontiguousarray(img_gt)).float()
         img_lq = torch.from_numpy(np.ascontiguousarray(img_lq)).float()
 
-        # --- Normalize Tensors to [-1, 1] ---
+        # Normalize to -1 to 1 range
         img_gt = linear_transform_4b(img_gt, stage="norm")
         img_lq = linear_transform_4b(img_lq, stage="norm")
-
+        
         return {'lq': img_lq, 'gt': img_gt, 'lq_path': lq_path, 'gt_path': gt_path}
 
     def __len__(self):
