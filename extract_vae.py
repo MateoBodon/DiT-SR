@@ -9,7 +9,7 @@ def extract_vae_weights(full_ckpt_path, output_vae_ckpt_path, vae_prefix="first_
         full_ckpt_path (str): Path to the downloaded full model checkpoint.
         output_vae_ckpt_path (str): Path where the extracted VAE weights will be saved.
         vae_prefix (str): The prefix used for VAE model keys in the full checkpoint.
-                          Commonly "first_stage_model." for LDM-based models.
+                        Commonly "first_stage_model." for LDM-based models.
     """
     print(f"Loading full checkpoint from: {full_ckpt_path}")
     # Load the full checkpoint, move to CPU to avoid GPU memory issues if not needed for this script
