@@ -1,106 +1,124 @@
+# ==============================================================================
+# 1. TRAINER CONFIGURATION
+# ==============================================================================
+# Specifies the main trainer class to use for this experiment.
 trainer:
   target: trainer.TrainerDifIR
 
+
+# ==============================================================================
+# 2. FIRST-STAGE MODEL (4-CHANNEL VAE)
+# ==============================================================================
+# This section defines the pre-trained 4-channel Variational Autoencoder (VAE)
+# which is used to encode images into a latent space. The diffusion model
+# will operate on this latent space, not on the raw pixel space.
 four_channel_autoencoder:
+  # Path to the pre-trained VAE checkpoint file.
   ckpt_path: "checkpoints/sen2naip_vae_from_opensr.ckpt"
+  # The VAE's weights are frozen during diffusion model training.
   trainable: false
   compile: false
   params:
+    # The embedding dimension of the VAE's latent space.
     embed_dim: 4
     ddconfig:
+      # --- VAE Architecture ---
+      # These parameters must match the architecture of the pre-trained VAE.
       double_z: True
       z_channels: 4
       resolution: 256
+      # IMPORTANT: Defines the number of input and output channels for the VAE.
       in_channels: 4
       out_ch: 4
- # --- CORRECTED ARCHITECTURE PARAMETERS ---
       ch: 128
-      ch_mult: [ 1, 2, 4, 4 ] # This creates the larger 512-channel layers
+      # Channel multipliers for each level of the VAE's U-Net architecture.
+      ch_mult: [ 1, 2, 4, 4 ]
       num_res_blocks: 2
-      # ---
-      attn_resolutions: [16] # updated
+      attn_resolutions: [16]
       dropout: 0.0
 
+
+# ==============================================================================
+# 3. MAIN MODEL (DiT-SR)
+# ==============================================================================
+# This section defines the main Diffusion Transformer (DiT) model that will be
+# trained to perform the super-resolution task in the VAE's latent space.
 model:
   target: models.unet.DiTSRModel
-  ckpt_path: ~
+  ckpt_path: ~ # No checkpoint path, as we are training this model from scratch.
   params:
-    image_size: 16
+    # --- DiT U-Net Architecture ---
+    image_size: 16            # The model operates on 16x16 latents.
+    # IMPORTANT: The number of input channels for the U-Net.
+    # This is 8 because we concatenate the 4-channel noisy latent (z_t) with
+    # the 4-channel conditioning latent from the low-quality image.
     in_channels: 8
-    model_channels: 160
+    model_channels: 160       # The base number of channels in the model.
+    # The model outputs a 4-channel latent prediction.
     out_channels: 4
-    attention_resolutions: [64, 32, 16, 8]
+    attention_resolutions: [64, 32, 16, 8] # Resolutions where Swin Transformer blocks are used.
     dropout: 0.1
     channel_mult: [1, 2, 2, 4]
     conv_resample: True
     dims: 2
     use_fp16: False
     num_head_channels: 32
-    swin_depth: 6
+    swin_depth: 6             # Depth of the Swin Transformer blocks.
     swin_embed_dim: 192
     window_size: 4
     mlp_ratio: 4
-    cond_lq: True
-    lq_size: 64
-    # --- FIX: Explicitly tell the model our LR image has 4 channels ---
+    cond_lq: True             # Enable conditioning on the low-quality image.
+    lq_size: 64               # The spatial size of the LR input images.
+    # IMPORTANT: Explicitly tells the model that the conditioning image has 4 channels.
     lq_channels: 4
 
+
+# ==============================================================================
+# 4. DIFFUSION PROCESS
+# ==============================================================================
+# This section defines the parameters for your custom eta-based diffusion process.
 diffusion:
+  # The factory function that will create the diffusion process object.
   target: models.script_util.create_gaussian_diffusion
   params:
-    sf: 4
+    sf: 4                     # The super-resolution scale factor.
+    # --- Noise Schedule ---
     schedule_name: exponential
     schedule_kwargs:
-      power: 0.3
-    etas_end: 0.99
-    steps: 15
+      power: 0.3              # Controls the curvature of the exponential schedule.
+    etas_end: 0.99            # The final noise level at the end of the schedule.
+    steps: 15                 # The number of discrete steps for the sampler (e.g., DDIM).
     min_noise_level: 0.04
     kappa: 2.0
-    loss_type: L1
-    #predict_type: xstart
-    # --- FIX: Set the timestep respacing ---
+    # --- Model and Loss Configuration ---
+    loss_type: L1             # Use L1 loss for training.
+    # The model is trained to directly predict the clean latent (x_0).
     model_mean_type: START_X
+    # Use DDIM with 15 steps for sampling. This must match `steps` above.
     timestep_respacing: "ddim15"
-    scale_factor: 1.0
+    scale_factor: 1.0         # A factor to scale the VAE's latent space.
     normalize_input: True
+    # The diffusion process operates on the VAE's latent space.
     latent_flag: True
 
 
-degradation:
-  sf: 4
-  resize_prob: [0.2, 0.7, 0.1]
-  resize_range: [0.15, 1.5]
-  gaussian_noise_prob: 0.5
-  noise_range: [1, 30]
-  poisson_scale_range: [0.05, 3.0]
-  gray_noise_prob: 0.4
-  jpeg_range: [30, 95]
-  second_order_prob: 0.5
-  second_blur_prob: 0.8
-  resize_prob2: [0.3, 0.4, 0.3]
-  resize_range2: [0.3, 1.2]
-  gaussian_noise_prob2: 0.5
-  noise_range2: [1, 25]
-  poisson_scale_range2: [0.05, 2.5]
-  gray_noise_prob2: 0.4
-  jpeg_range2: [30, 95]
-  gt_size: 256
-  resize_back: False
-  use_sharp: False
-
+# ==============================================================================
+# 5. DATASET CONFIGURATION
+# ==============================================================================
+# This section defines the training and validation datasets.
 data:
   train:
     name: SEN2NAIP_Train
+    # Use your custom dataset class for 4-channel data.
     type: SEN2NAIPDataset
-    # Point to the new train directory
+    # The dataloader will look for a 'train' subfolder in this path.
     dataroot_gt: /Volumes/SSD/GIS/cross-sensor/train/
-    dataroot_lq: ~ # No longer needed
+    dataroot_lq: ~ # Not needed, as lr/hr pairs are in the same directory.
     io_backend: {type: disk}
-
     gt_size: 256
     scale: 4
-    use_hflip: true
-    use_rot: true
+    use_hflip: true           # Enable horizontal flip augmentation.
+    use_rot: true             # Enable rotation augmentation.
     num_worker_per_gpu: 4
     batch_size_per_gpu: 2
     dataset_enlarge_ratio: 1
@@ -109,14 +127,18 @@ data:
   val:
     name: SEN2NAIP_Val
     type: SEN2NAIPDataset
-    # Point to the new val directory
+    # The dataloader will look for a 'val' subfolder in this path.
     dataroot_gt: /Volumes/SSD/GIS/cross-sensor/val/
-    dataroot_lq: ~ # No longer needed
+    dataroot_lq: ~ # Not needed.
     io_backend: {type: disk}
     scale: 4
     phase: val
     gt_size: 256
 
+
+# ==============================================================================
+# 6. TRAINING HYPERPARAMETERS
+# ==============================================================================
 train:
   lr: 0.00005
   lr_min: 0.00002
@@ -138,7 +160,7 @@ train:
   val_y_channel: True
   val_resolution: ${model.params.lq_size}
   val_padding_mode: reflect
-  use_amp: True
+  use_amp: True               # Use Automatic Mixed Precision for faster training on CUDA.
   seed: 123456
   global_seeding: False
   compile:

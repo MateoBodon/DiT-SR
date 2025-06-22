@@ -1,12 +1,33 @@
+# ==============================================================================
+# 1. IMPORTS
+# ==============================================================================
+
 import yaml
 import torch
 from omegaconf import OmegaConf
+import traceback
 
-# --- CHANGE: Import SEN2NAIPDataset directly ---
+# Your custom Dataset class for 4-channel data
 from datapipe.sen2naip_dataset import SEN2NAIPDataset
 
+
+# ==============================================================================
+# 2. MAIN FUNCTION
+# ==============================================================================
+
 def main():
-    # --- 1. Load Configuration ---
+    """
+    Main function to test the SEN2NAIPDataset and DataLoader.
+
+    This script is a crucial debugging tool. It isolates the data loading part
+    of the pipeline to verify that:
+    1. The dataset can be initialized without errors.
+    2. It can correctly find and load the 4-channel GeoTIFF image pairs.
+    3. It produces tensors of the correct shape and data type.
+    4. The normalization is working as expected (values are in the [-1, 1] range).
+    """
+    # --- Step 1: Load Configuration ---
+    # We load the main training config to get the dataset parameters.
     config_path = './configs/realsr_DiT.yaml'
     try:
         with open(config_path, 'r') as f:
@@ -16,37 +37,33 @@ def main():
         return
 
     configs = OmegaConf.create(yaml_config)
-    
     print("--- Configuration Loaded ---")
     print(f"GT Path: {configs.data.train.dataroot_gt}")
-    print(f"LQ Path: {configs.data.train.get('dataroot_lq', 'Not specified')}") # Use .get for safety
     print("--------------------------\n")
 
-    # --- 2. Create Dataset Directly ---
+    # --- Step 2: Create Dataset Directly ---
+    # We instantiate the dataset class directly to test it in isolation from
+    # the main trainer framework.
     try:
-        # --- CHANGE: Instantiate the class directly, bypassing the framework ---
         print("--- Attempting to create dataset directly... ---")
         train_dataset = SEN2NAIPDataset(configs.data.train)
-        
     except Exception as e:
         print(f"--- [ERROR] An exception occurred while creating the dataset ---")
-        # Print the full traceback for detailed debugging
-        import traceback
         traceback.print_exc()
         return
-        
+
     print(f"\nSUCCESS: Dataset created. Found {len(train_dataset)} image pairs.")
 
-    # --- 3. Create DataLoader ---
+    # --- Step 3: Create DataLoader ---
     dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=2, # Use a small batch size for testing
         shuffle=True,
-        num_workers=0
+        num_workers=0 # Use 0 workers for easier debugging
     )
     print("SUCCESS: DataLoader created.\n")
-    
-    # --- 4. Fetch and Inspect a Batch ---
+
+    # --- Step 4: Fetch and Inspect a Batch ---
     print("--- Fetching one batch of data ---")
     try:
         batch = next(iter(dataloader))
@@ -56,7 +73,8 @@ def main():
         print(f"LQ tensor shape: {lq.shape}")
         print(f"GT tensor shape: {gt.shape}")
 
-        # --- 5. Verify Data ---
+        # --- Step 5: Verify Data Properties ---
+        # Check the value range to ensure normalization to [-1, 1] is working.
         print("\n--- Verifying data properties ---")
         lq_min, lq_max = lq.min(), lq.max()
         gt_min, gt_max = gt.min(), gt.max()
@@ -66,8 +84,12 @@ def main():
 
     except Exception as e:
         print(f"\n--- [ERROR] An error occurred while fetching or inspecting the batch ---")
-        import traceback
         traceback.print_exc()
+
+
+# ==============================================================================
+# 3. EXECUTION BLOCK
+# ==============================================================================
 
 if __name__ == '__main__':
     main()

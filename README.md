@@ -1,20 +1,39 @@
 # DiT-SR for 4-Channel Satellite Image Super-Resolution
 
-This repository contains an adapted version of the **Effective Diffusion Transformer Architecture for Image Super-Resolution (DiT-SR)**, specifically modified to perform super-resolution on 4-channel satellite imagery, such as SEN2NAIP data (RGB + Near-Infrared).
+This repository contains an adapted version of the **Effective Diffusion Transformer Architecture for Image Super-Resolution (DiT-SR)**, specifically modified to perform 4x super-resolution on 4-channel satellite imagery (e.g., RGB + Near-Infrared).
 
-The core of this project involves integrating a custom 4-channel Variational Autoencoder (VAE) and a new data loading pipeline to handle the specific format of multi-spectral satellite images.
+The project's core contribution is the integration of a custom 4-channel Variational Autoencoder (VAE) and a new data pipeline to handle multi-spectral satellite images, enabling the powerful DiT-SR architecture to work beyond standard 3-channel RGB data.
 
 <p align="center">
   <img src="assets/framework.jpg" width="800">
   <br>
-  <i>Original DiT-SR Framework. This project adapts the model for 4-channel inputs.</i>
+  <i>The original DiT-SR framework. This project adapts the model and data pipeline for 4-channel inputs.</i>
 </p>
 
 ## Key Features
-- **4-Channel Image Support**: Natively processes 4-band imagery (e.g., RGB+NIR) instead of standard 3-channel RGB.
-- **Custom VAE Integration**: Utilizes a 4-channel VAE for encoding and decoding multi-spectral images into the latent space.
-- **SEN2NAIP Dataset Loader**: Includes a custom PyTorch dataset class for loading pairs of low-resolution and high-resolution 4-channel GeoTIFF files.
-- **Device-Agnostic Training**: The training pipeline is configured to run on NVIDIA (CUDA), Apple Silicon (MPS), or CPU devices automatically.
+- **4-Channel Support**: Natively processes 4-band imagery (e.g., RGB+NIR) for both model conditioning and output generation.
+- **Latent Diffusion**: Operates in the latent space of a pre-trained 4-channel VAE for memory and computational efficiency.
+- **Custom SEN2NAIP Dataloader**: Includes a robust PyTorch `Dataset` class for loading pairs of low-resolution and high-resolution 4-channel GeoTIFF files.
+- **HPC Ready**: The training pipeline is managed by `torchrun` for easy use in distributed, multi-GPU High-Performance Computing environments.
+- **Device-Agnostic**: Scripts automatically detect and use NVIDIA (CUDA), Apple Silicon (MPS), or CPU hardware.
+
+---
+
+## How It Works: The 4-Channel Pipeline
+
+Adapting DiT-SR for 4-channel data required two primary modifications:
+
+1.  **First Stage Model (VAE)**: The standard 3-channel VAE was replaced with a 4-channel `AutoencoderKL` model. This VAE is responsible for encoding the high-resolution 4-channel ground truth images into a compressed latent space. The DiT model is then trained to denoise these 4-channel latents.
+
+2.  **Conditioning**: The DiT model is conditioned on the low-resolution (LR) input image. To make this work, the 4-channel LR image is also passed through the VAE's encoder to produce a 4-channel conditioning latent. This latent is then concatenated with the noisy latent `z_t` at each step, providing the model with the necessary information to guide the super-resolution process.
+
+The overall data flow for a single training step is:
+`HR Image (4-ch) -> VAE Encoder -> Clean Latent (4-ch) -> Add Noise -> Noisy Latent z_t (4-ch)`
+`LR Image (4-ch) -> VAE Encoder -> Conditioning Latent (4-ch)`
+`DiT-SR Model <- [Noisy Latent z_t, Conditioning Latent, Timestep]`
+`DiT-SR Model -> Denoised Latent (4-ch)`
+
+---
 
 ## 1. Setup and Installation
 
@@ -27,7 +46,7 @@ The core of this project involves integrating a custom 4-channel Variational Aut
 1.  **Clone the repository:**
     ```bash
     git clone <your-repository-url>
-    cd <your-repository-name>
+    cd <repository-name>
     ```
 
 2.  **Create and activate a Conda environment:**
@@ -36,124 +55,158 @@ The core of this project involves integrating a custom 4-channel Variational Aut
     conda activate dit_sr
     ```
 
-3.  **Install the required dependencies:**
-    The `requirements.txt` file contains all necessary packages.
+3.  **Install PyTorch:**
+    Install the appropriate version of PyTorch for your hardware (see the [official PyTorch website](https://pytorch.org/get-started/locally/)). For a typical CUDA setup:
+    ```bash
+    pip install torch torchvision --index-url [https://download.pytorch.org/whl/cu118](https://download.pytorch.org/whl/cu118)
+    ```
+
+4.  **Install the remaining dependencies:**
+    The cleaned `requirements.txt` file contains all other necessary packages.
     ```bash
     pip install -r requirements.txt
     ```
 
 ## 2. Data Preparation (SEN2NAIP)
 
-This project requires a specific directory structure for the training and validation data.
+### Step 2.1: Directory Structure
+This project expects a specific directory structure where each scene (Region of Interest) has its own folder containing the `lr.tif` (low-resolution) and `hr.tif` (high-resolution) image pair.
 
-Create a root data folder and organize your images as follows, where each scene has its own sub-folder containing the low-resolution (`lr.tif`) and high-resolution (`hr.tif`) pairs.
+Place all your `ROI_XXXX` folders into a single root directory.
 
-```
+/path/to/your/dataset/
+├── ROI_0001/
+│   ├── lr.tif
+│   └── hr.tif
+├── ROI_0002/
+│   ├── lr.tif
+│   └── hr.tif
+└── ...
+
+
+### Step 2.2: Create Train/Validation Split
+Run the provided utility script to automatically create a training and validation split. This script creates symbolic links to avoid duplicating data.
+
+1.  Open the `prepare_datasplit.py` script.
+2.  Set the `dataset_root` variable to point to your dataset directory (e.g., `/path/to/your/dataset/`).
+3.  Run the script:
+    ```bash
+    python prepare_datasplit.py
+    ```
+After running, your data folder will have the following structure, which is what the dataloader expects:
+
 /path/to/your/dataset/
 ├── train/
-│   ├── scene_1/
-│   │   ├── lr.tif
-│   │   └── hr.tif
-│   ├── scene_2/
-│   │   ├── lr.tif
-│   │   └── hr.tif
+│   ├── ROI_0001 -> (symlink to ../ROI_0001)
 │   └── ...
-└── val/
-    ├── scene_A/
-    │   ├── lr.tif
-    │   └── hr.tif
-    └── ...
-```
-
-The dataloader (`datapipe/sen2naip_dataset.py`) is designed to walk through these directories and automatically pair the `lr.tif` and `hr.tif` files.
-
-## 3. Pre-trained Models
-
-This model relies on two sets of pre-trained weights that must be downloaded and placed in the correct folders.
-
-1.  **Original DiT-SR Checkpoints**:
-    These include models for loss calculation. Download them from the original author's provided link.
-    - **Download Link**: [Google Drive](https://drive.google.com/drive/folders/15EQYY3aKUKB9N3ec-AsXAZlhdCFzhT4R?usp=sharing)
-    - **Action**: Place the downloaded `.pth` files into the `weights/` directory.
-
-2.  **4-Channel VAE Checkpoint**:
-    This is the custom VAE for handling 4-channel imagery.
-    - **Download Link**: [**NOTE: You need to host this file and provide a link here.**]
-    - **Action**: Download the `sen2naip_vae_from_opensr.ckpt` file and place it into the `checkpoints/` directory.
-
-The directory structure should look like this after setup:
-```
-.
-├── checkpoints/
-│   └── sen2naip_vae_from_opensr.ckpt
-├── weights/
-│   ├── file1.pth
+├── val/
+│   ├── ROI_0002 -> (symlink to ../ROI_0002)
 │   └── ...
+├── ROI_0001/
+├── ROI_0002/
 └── ...
-```
 
-## 4. Training
 
-The training process is managed by `torchrun` for distributed training and configured via YAML files.
+## 3. Pre-trained Weights
 
-- **Configuration File**: `configs/realsr_DiT.yaml`
-- **Training Script**: `main.py`
+This project requires a pre-trained 4-channel VAE.
 
-To start training on your SEN2NAIP dataset, run the following command. Note that you should override the data paths in the config with command-line arguments for portability.
+The VAE is not provided directly. You must extract it from the full model checkpoint provided by the [ESAOpenSR/opensr-model](https://github.com/ESAOpenSR/opensr-model) project.
 
+1.  Download their full model checkpoint (e.g., `opensr_10m_v4_v4.ckpt`).
+2.  Run the provided `extract_vae.py` script to create the VAE-only checkpoint file.
+    - Open `extract_vae.py`.
+    - Set `downloaded_full_ckpt` to the path of the file you just downloaded.
+    - Set `extracted_vae_ckpt` to `"checkpoints/sen2naip_vae_from_opensr.ckpt"`.
+    - Run the script: `python extract_vae.py`
+3.  This will create the required VAE file at the correct location (`checkpoints/`). The path in the YAML config already points to this location.
+
+## 4. Testing Your Setup
+
+Before launching a full training run, verify that your environment, data, and models are configured correctly.
+
+### 4.1. Test the Dataloader
+This script checks if your data is being loaded and processed correctly.
 ```bash
-torchrun --standalone --nproc_per_node=8 main.py \
+python test_dataloader.py
+
+Expected Output: The script should print the shapes and value ranges of the loaded tensors, confirming that your data is normalized between -1.0 and 1.0.
+
+4.2. Run an Overfitting Test
+This test performs a sanity check of the entire training pipeline (model, data, and loss function) by attempting to overfit on a single batch.
+
+python overfit_test.py
+
+Expected Output: You should see the loss value printed to the console decrease steadily over 300 iterations. This confirms the model is capable of learning.
+
+5. Training
+The training process is managed by torchrun and configured via the configs/realsr_DiT.yaml file.
+
+5.1. Update Configuration
+Open configs/realsr_DiT.yaml and update the dataroot_gt paths under the data.train and data.val sections to point to your dataset's train and val directories.
+
+5.2. Training on a Local Machine (Single or Multi-GPU)
+Use torchrun to launch the training script. Adjust --nproc_per_node to the number of GPUs you have available.
+
+# Example for a machine with 2 GPUs
+torchrun --standalone --nproc_per_node=2 main.py \
     --cfg_path configs/realsr_DiT.yaml \
-    --save_dir /path/to/your/save_directory \
-    --data_train_gt /path/to/your/dataset/train \
-    --data_val_gt /path/to/your/dataset/val
-```
-*(Note: Adjust `--nproc_per_node` to the number of GPUs you have available.)*
+    --save_dir /path/to/your/save_directory
 
+5.3. Training on HPC with Slurm
+For HPC clusters using the Slurm scheduler, you can use a submission script.
 
-## 5. Inference
+Create a file named train_hpc.sh.
 
-To run super-resolution on new images using your trained model, use the `inference.py` script.
+Copy the following content into the file, adjusting the --nodes, --gpus, and path variables as needed.
 
-1.  First, ensure your trained model checkpoint (`.pth` file) is available.
-2.  Run the inference command:
+#!/bin/bash
+#SBATCH --job-name=dit-sr-4ch
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --gpus-per-task=4
+#SBATCH --mem=128G
+#SBATCH --time=48:00:00
 
-```bash
+# Activate your conda environment
+source /path/to/your/conda/etc/profile.d/conda.sh
+conda activate dit_sr
+
+# Set environment variables for distributed training
+export MASTER_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
+export MASTER_PORT=12345
+
+# Launch training with torchrun
+torchrun --nnodes=$SLURM_NNODES --nproc_per_node=$SLURM_GPUS_PER_TASK \
+    --rdzv_id=$SLURM_JOB_ID --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
+    main.py \
+    --cfg_path configs/realsr_DiT.yaml \
+    --save_dir /path/to/your/save_directory
+
+Submit the job to the scheduler:
+
+sbatch train_hpc.sh
+
+6. Inference
+To run super-resolution on new images using your trained model, use the inference.py script.
+
 python inference.py --task realsr --scale 4 \
     --config_path configs/realsr_DiT.yaml \
     --ckpt_path /path/to/your/trained_model.pth \
     -i /path/to/input/images \
     -o /path/to/output/results
-```
 
-## 6. Testing the Pipeline
+Acknowledgements
+This work is built upon the original DiT-SR repository by Cheng et al.
 
-This repository includes scripts to help you verify your setup before launching a full training run.
+We sincerely appreciate the code release of ResShift, DiT, FFTFormer, SwinIR, SinSR, and BasicSR.
 
-### Test the Dataloader
-You can test the `SEN2NAIPDataset` to ensure your data is being loaded and processed correctly.
+The 4-channel VAE was adapted from the ESAOpenSR/opensr-model project.
 
-```bash
-python test_dataloader.py
-```
-This script will load the configuration from `configs/realsr_DiT.yaml` and attempt to fetch one batch of data, printing the tensor shapes and value ranges.
-
-### Test for Overfitting
-To perform a quick sanity check of the entire training pipeline (model, data, and loss function), you can run an overfitting test on a single batch of data. The loss should decrease steadily.
-
-```bash
-python overfit_test.py
-```
-This will run 300 training iterations on one batch and print the loss, confirming that the model is learning.
-
-## Acknowledgements
-- This work is built upon the original **DiT-SR** repository by Cheng et al.
-- We sincerely appreciate the code release of [ResShift](https://github.com/zsyOAOA/ResShift), [DiT](https://github.com/facebookresearch/DiT), [FFTFormer](https://github.com/kkkls/FFTformer), [SwinIR](https://github.com/JingyunLiang/SwinIR), [SinSR](https://github.com/wyf0912/SinSR), and [BasicSR](https://github.com/XPixelGroup/BasicSR).
-- The 4-channel VAE was adapted from the [ESAOpenSR/opensr-model](https://github.com/ESAOpenSR/opensr-model) project.
-
-## Citation
+Citation
 If you use the original DiT-SR work, please consider citing:
-```
+
 @inproceedings{cheng2025effective,
   title={Effective diffusion transformer architecture for image super-resolution},
   author={Cheng, Kun and Yu, Lei and Tu, Zhijun and He, Xiao and Chen, Liyu and Guo, Yong and Zhu, Mingrui and Wang, Nannan and Gao, Xinbo and Hu, Jie},
@@ -163,4 +216,3 @@ If you use the original DiT-SR work, please consider citing:
   pages={2455--2463},
   year={2025}
 }
-```
