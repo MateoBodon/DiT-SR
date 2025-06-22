@@ -127,7 +127,7 @@ Before launching a full training run, verify that your environment, data, and mo
 
 ### 4.1. Test the Dataloader
 This script checks if your data is being loaded and processed correctly.
-```bash
+"```bash" 
 python test_dataloader.py
 
 Expected Output: The script should print the shapes and value ranges of the loaded tensors, confirming that your data is normalized between -1.0 and 1.0.
